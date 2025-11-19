@@ -37,7 +37,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Build static site
-        run: python main.py
+        run: python main.py --generate
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact

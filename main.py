@@ -4407,12 +4407,27 @@ class NewsAnalyzer:
         self, mode_strategy: Dict, results: Dict, id_to_name: Dict, failed_ids: List
     ) -> Optional[str]:
         """执行模式特定逻辑"""
-        # 获取当前监控平台ID列表
-        current_platform_ids = [platform["id"] for platform in CONFIG["PLATFORMS"]]
-
-        new_titles = detect_latest_new_titles(current_platform_ids)
-        time_info = Path(save_titles_to_file(results, id_to_name, failed_ids)).stem
-        word_groups, filter_words = load_frequency_words()
+        if not results:
+            # 如果没有传入实时爬取的数据，则从文件中加载今天的数据
+            analysis_data = self._load_analysis_data()
+            if not analysis_data:
+                print("未能加载到任何可供分析的数据。")
+                return None
+            (
+                results,
+                id_to_name,
+                title_info,
+                new_titles,
+                word_groups,
+                filter_words,
+            ) = analysis_data
+        else:
+            # 如果传入了实时爬取的数据，则基于这些数据进行分析
+            current_platform_ids = [platform["id"] for platform in CONFIG["PLATFORMS"]]
+            new_titles = detect_latest_new_titles(current_platform_ids)
+            time_info = Path(save_titles_to_file(results, id_to_name, failed_ids)).stem
+            word_groups, filter_words = load_frequency_words()
+            title_info = self._prepare_current_title_info(results, time_info)
 
         # current模式下，实时推送需要使用完整的历史数据来保证统计信息的完整性
         if self.report_mode == "current":
@@ -4463,7 +4478,6 @@ class NewsAnalyzer:
                 print("❌ 严重错误：无法读取刚保存的数据文件")
                 raise RuntimeError("数据一致性检查失败：保存后立即读取失败")
         else:
-            title_info = self._prepare_current_title_info(results, time_info)
             stats, html_file = self._run_analysis_pipeline(
                 results,
                 self.report_mode,
@@ -4519,16 +4533,20 @@ class NewsAnalyzer:
 
         return summary_html
 
-    def run(self) -> None:
+    def run(self, crawl: bool = True, generate: bool = True) -> None:
         """执行分析流程"""
         try:
             self._initialize_and_check_config()
 
             mode_strategy = self._get_mode_strategy()
 
-            results, id_to_name, failed_ids = self._crawl_data()
+            if crawl:
+                results, id_to_name, failed_ids = self._crawl_data()
+            else:
+                results, id_to_name, failed_ids = {}, {}, []
 
-            self._execute_mode_strategy(mode_strategy, results, id_to_name, failed_ids)
+            if generate:
+                self._execute_mode_strategy(mode_strategy, results, id_to_name, failed_ids)
 
         except Exception as e:
             print(f"分析流程执行出错: {e}")
@@ -4536,9 +4554,24 @@ class NewsAnalyzer:
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="TrendRadar News Analyzer")
+    parser.add_argument(
+        "--crawl", action="store_true", help="Run the crawler to fetch data"
+    )
+    parser.add_argument(
+        "--generate", action="store_true", help="Generate the HTML report"
+    )
+    args = parser.parse_args()
+
+    # 如果没有提供任何参数，则默认执行所有操作
+    run_crawl = args.crawl or not (args.crawl or args.generate)
+    run_generate = args.generate or not (args.crawl or args.generate)
+
     try:
         analyzer = NewsAnalyzer()
-        analyzer.run()
+        analyzer.run(crawl=run_crawl, generate=run_generate)
     except FileNotFoundError as e:
         print(f"❌ 配置文件错误: {e}")
         print("\n请确保以下文件存在:")
